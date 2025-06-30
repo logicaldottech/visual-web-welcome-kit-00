@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { httpFile } from '../config.js';
 import { apiCache } from '../services/apiCache.js';
 
@@ -8,21 +8,24 @@ export const useMySiteData = (params = {}) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Memoize params to prevent unnecessary re-renders
+  const memoizedParams = useMemo(() => params, [JSON.stringify(params)]);
+
   // Get project ID from params, localStorage, or env
   const getProjectId = useCallback(() => {
-    if (params.projectId) return params.projectId;
+    if (memoizedParams.projectId) return memoizedParams.projectId;
     if (import.meta.env.VITE_PROJECT_ID) return import.meta.env.VITE_PROJECT_ID;
     const savedSiteId = localStorage.getItem("currentSiteId");
     return savedSiteId || "685cffa53ee7098086538c06";
-  }, [params.projectId]);
+  }, [memoizedParams.projectId]);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     try {
       const projectId = getProjectId();
       const requestParams = {
         projectId,
-        pageType: params.pageType || "home",
-        ...params
+        pageType: memoizedParams.pageType || "home",
+        ...memoizedParams
       };
 
       const cacheKey = apiCache.generateCacheKey('/webapp/v1/my_site', requestParams);
@@ -33,6 +36,7 @@ export const useMySiteData = (params = {}) => {
         setData(cachedData.data);
         setIsLoading(false);
         setError(null);
+        return; // Important: return early to avoid making API call
       }
 
       // Prepare headers for ETag conditional request
@@ -77,14 +81,14 @@ export const useMySiteData = (params = {}) => {
       setError(err);
       setIsLoading(false);
     }
-  }, [params, getProjectId]);
+  }, [memoizedParams, getProjectId]);
 
   useEffect(() => {
     const projectId = getProjectId();
     const requestParams = {
       projectId,
-      pageType: params.pageType || "home",
-      ...params
+      pageType: memoizedParams.pageType || "home",
+      ...memoizedParams
     };
 
     const cacheKey = apiCache.generateCacheKey('/webapp/v1/my_site', requestParams);
@@ -96,11 +100,19 @@ export const useMySiteData = (params = {}) => {
       setError(null);
     });
 
-    // Initial fetch
-    fetchData();
+    // Initial fetch - only if we don't have cached data
+    const cachedData = apiCache.getCachedData(cacheKey);
+    if (!cachedData) {
+      fetchData();
+    } else {
+      // Use cached data immediately
+      setData(cachedData.data);
+      setIsLoading(false);
+      setError(null);
+    }
 
     return unsubscribe;
-  }, [fetchData]);
+  }, [fetchData, getProjectId, memoizedParams]);
 
   return {
     data,
